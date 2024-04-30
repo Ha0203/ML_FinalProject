@@ -12,7 +12,7 @@ storage_images = []
 
 def main():
     st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to", ["Text2Img", "Img2Img"])
+    page = st.sidebar.selectbox("Go to", ["Text2Img", "Img2Img"])
     if page == "Text2Img":
         Text2Img()
     elif page == "Img2Img":
