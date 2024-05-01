@@ -4,32 +4,66 @@ import numpy as np
 import io
 import torch
 from diffusers import DiffusionPipeline
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline, StableDiffusionInstructPix2PixPipeline, EulerAncestralDiscreteScheduler, StableDiffusionXLImg2ImgPipeline, StableDiffusionControlNetImg2ImgPipeline, ControlNetModel, DDIMScheduler
 
 st.set_page_config(layout="wide")
 
-storage_images = []
+if 'imgs' not in st.session_state:
+    st.session_state['imgs'] = []
 
 def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.selectbox("Go to", ["Text2Img", "Img2Img"])
-    if page == "Text2Img":
-        Text2Img()
-    elif page == "Img2Img":
-        Img2Img()
 
+    st.title('Text-to-Image AI-based Chatbot')
+
+    col1, col2, col3 = st.columns([2, 3, 2])
+    
+    if page == "Text2Img":
+        Text2Img(col1, col2, col3)
+    elif page == "Img2Img":
+        Img2Img(col1, col2, col3)
+
+    for idx in range(0, len(st.session_state['imgs']), 2):
+        # Create a new row to display two images side by side
+        row = col3.columns(2)
+
+        img = st.session_state['imgs'][idx]
+        
+        # Display the first image in the pair
+        row[0].image(img, caption=f'Generated Image {idx+1}', use_column_width=True)
+        
+        # Check if there's a second image to display
+        if idx + 1 < len(st.session_state['imgs']):
+            # Display the second image in the pair
+            row[1].image(st.session_state['imgs'][idx + 1], caption=f'Generated Image {idx+2}', use_column_width=True)
 
 # Function to generate images based on user input
-def generate_images(text, size, num_images, quality):
-    # Placeholder function, replace with your actual implementation
-    generated_images = []
-    for _ in range(num_images):
-        # Use your model to generate an image based on the input text
-        # Example:
-        # image = model.generate_image(text, size, quality)
-        # generated_images.append(image)
-        pass
-    return generated_images
+def generate_images(text, model, num_images, quality):
+    if model == 'amused/amused-256':
+        print("Model selected: 256")
+        # pipe = st.session_state['model1']
+        pipe = DiffusionPipeline.from_pretrained('amused/amused-256', variant="fp16", torch_dtype=torch.float16)
+    elif model == 'amused/amused-512':
+        print("Model selected: 512")
+        # pipe = st.session_state['model2']
+        pipe = DiffusionPipeline.from_pretrained('amused/amused-512', variant="fp16", torch_dtype=torch.float16)
+    else: 
+        print("Model selected: diffusion")
+        # pipe = st.session_state['model3']
+        pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", variant="fp16", torch_dtype=torch.float16)
+
+    pipe = pipe.to('cuda')
+
+    
+    images = pipe(
+        text, 
+        num_images_per_prompt=num_images, 
+        num_inference_steps=quality,
+        generator=torch.Generator('cuda').manual_seed(8)
+        ).images
+
+    return images
 
 # Function to convert PIL image to bytes
 def pil_to_bytes(image):
@@ -37,11 +71,7 @@ def pil_to_bytes(image):
     image.save(img_byte_array, format='PNG')
     return img_byte_array.getvalue()
 
-def Text2Img():
-
-    st.title('Text-to-Image AI-based Chatbot')
-
-    col1, col2 = st.columns([1, 1])
+def Text2Img(col1, col2, col3):
     
     # Text input box
     user_input = col1.text_input("Enter your text here:")
@@ -61,14 +91,10 @@ def Text2Img():
     if col1.button("Generate Images"):
         if user_input:
             with st.spinner('Generating...'):
-                # Placeholder for generated images of current generation
-                generated_images = []
-                
-                # Generate the specified number of images
-                for i in range(num_images):
-                    example_image = Image.open(f"example_img_{i+1}.jpg")
-                    generated_images.append(example_image)
-                    storage_images.append(example_image)
+                # Placeholder for generated images of current generatio                generated_images = []   
+                generated_images = generate_images(user_input, selected_model, num_images, image_quality)
+
+                st.session_state['imgs'].extend(generated_images) 
                 
                 # Display the generated images in col2
                 if len(generated_images) == 1:
@@ -104,11 +130,31 @@ def Text2Img():
         else:
             col2.warning("Please enter some text.")
             
-def Img2Img():
+def refineImage(text, model, num_imgs, quality, init_img):
+    if model == 'timbrooks/instruct-pix2pix':
+        print("timbrooks/instruct-pix2pix")
+        # pipe = st.session_state['model4']
+        pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained("timbrooks/instruct-pix2pix", torch_dtype=torch.float16, safety_checker=None)
+        pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+       
+    else: 
+        print("stabilityai/stable-diffusion-xl-refiner-1.0")
+        # pipe = st.session_state['model5']
+        pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained("stabilityai/stable-diffusion-xl-refiner-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True)
 
-    st.title('Image-to-Image AI-based Chatbot')
+    pipe = pipe.to('cuda')
 
-    col1, col2 = st.columns([1, 1])
+    images = pipe(
+        text, 
+        image=init_img,
+        num_images_per_prompt=num_imgs, 
+        num_inference_steps=quality,
+        generator=torch.Generator('cuda').manual_seed(8)
+        ).images
+
+    return images
+        
+def Img2Img(col1, col2, col3):
     
     # File uploader for user input
     uploaded_file = col1.file_uploader("Upload an image file:", type=["jpg", "jpeg", "png"])
@@ -130,7 +176,7 @@ def Img2Img():
     user_input = col1.text_input("Enter your text here:")
 
     # Select models
-    model_opts = ["amused/amused-256", "amused/amused-512", "runwayml/stable-diffusion-v1-5"]
+    model_opts = ["timbrooks/instruct-pix2pix", "stabilityai/stable-diffusion-xl-refiner-1.0"]
     selected_model = col1.selectbox("Select model:", model_opts)
 
     # Number of images input
@@ -142,16 +188,10 @@ def Img2Img():
     
     # Generate button
     if col1.button("Generate Images"):
-        if user_input:
+        if user_input and uploaded_file:
             with st.spinner('Generating...'):
                 # Placeholder for generated images of current generation
-                generated_images = []
-                
-                # Generate the specified number of images
-                for i in range(num_images):
-                    example_image = Image.open(f"example_img_{i+1}.jpg")
-                    generated_images.append(example_image)
-                    storage_images.append(example_image)
+                generated_images = refineImage(user_input, selected_model, num_images, image_quality, preview_image)
                 
                 # Display the generated images in col2
                 if len(generated_images) == 1:
@@ -184,8 +224,14 @@ def Img2Img():
                         else:
                             # Display placeholder if there's no second image
                             row[1].info("No second image to display.")
+                
+                st.session_state['imgs'].extend(generated_images)
         else:
-            col2.warning("Please enter some text.")
+            if not user_input:
+                col2.warning("Please enter some text.")
+            else:
+                col2.warning("Please upload image")
+        
 
 if __name__ == "__main__":
     main()
